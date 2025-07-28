@@ -14,6 +14,12 @@ pid_data_struct pid_height = {0};
 attitude_data_struct attitude_data = {0};
 bmi088_data_struct bmi088_data = {0};
 spl06_data_struct spl06_data = {0};
+#ifdef ATTITUDE_USING_QUATERNION
+attitude_quaternion_struct attitude_quaternion = {.q = {1.0f, 0.0f, 0.0f, 0.0f},
+                                                  .integral_e = {0.0f, 0.0f, 0.0f},
+                                                  .mahony_kp = 2.0f,
+                                                  .mahony_ki = 0.005f};
+#endif /* ATTITUDE_USING_QUATERNION */
 uint8_t dma_receive_buffer[BUFFER_SIZE];
 com_data_struct com_data = {
     .head_frame_size = 3,
@@ -50,7 +56,6 @@ const osThreadAttr_t task_error_attributes = {
     .name = "errorTask",
     .priority = osPriorityRealtime6,
     .stack_size = 512};
-
 /* Function declarations */
 static void timer_send_callback(void *argument);
 static void task_state_machine(void *argument);
@@ -96,7 +101,7 @@ void app_start(void)
    */
   HAL_UART_Receive_DMA(&huart1, dma_receive_buffer, sizeof(dma_receive_buffer));
   HAL_TIM_Base_Start_IT(&htim6);
-  tusb_init();
+  //tusb_init();
   attitude_init(&attitude_data, 0);
   dwt_init(); // Initialize DWT for cycle counting
   pid_init(&pid_pitch, 8.0f, 0.2f, 0.0f, 200, 400);
@@ -206,7 +211,11 @@ static void task_state_machine(void *argument)
       if (++bmi088_sync_counter >= 4) // 每4次循环处理一次传感器数据，约400Hz
       {
         bmi088_sync_counter = 0; // 重置计数器
+#ifdef ATTITUDE_USING_QUATERNION
+        attitude_mahony_angle_calculate(&bmi088_data, &attitude_quaternion, &attitude_data);
+#else
         attitude_angle_calculate(&attitude_data, &bmi088_data);
+#endif /* ATTITUDE_USING_QUATERNION */
         attitude_motor_control(&attitude_data, &bmi088_data, &pid_pitch, &pid_roll, &pid_pitch_rate, &pid_roll_rate);
         // 高度控制以较低频率运行 (~50Hz)
         if (++spl06_sync_counter >= 8)
