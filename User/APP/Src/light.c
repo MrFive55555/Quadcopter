@@ -6,7 +6,7 @@
  */
 
 #include "light.h"
-void light_init(void)
+void light_off_all(void)
 {
     // Initialize the light control pins
     light_control(LIGHT_TAKE_OFF, LIGHT_OFF);

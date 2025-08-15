@@ -6,10 +6,10 @@
  */
 
 #include "error.h"
-static osMessageQueueId_t queue_error_id = NULL;
-void error_init(osMessageQueueId_t queue)
+static error_callback_t error_callback;
+void error_register_callback(error_callback_t callback)
 {
-    queue_error_id = queue;
+    error_callback = callback;
 }
 void error_check(error_device_enum device, error_type_enum error)
 {
@@ -19,9 +19,6 @@ void error_check(error_device_enum device, error_type_enum error)
         error_queue_struct error_queue = {0};
         error_queue.device = device;
         error_queue.type = error;
-        if (queue_error_id != NULL)
-        {
-            osMessageQueuePut(queue_error_id, &error_queue, 0, 0);
-        }
+        error_callback(error_queue);
     }
 }

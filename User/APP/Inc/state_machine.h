@@ -29,8 +29,8 @@ typedef enum
     EVT_NONE,           // 无事件
     EVT_CMD_TAKE_OFF,   // 收到“起飞”指令事件
     EVT_CMD_LAND,       // 收到“降落”指令事件
-    EVT_KEEP_ALIVE,     // 收到“心跳”事件
     EVT_CRITICAL_ERROR, // 发生严重错误事件
+    EVT_KEEP_ALIVE,     // 收到“心跳”事件
 } state_machine_event_enum;
 
 #endif /* STATE_MACHINE_H */

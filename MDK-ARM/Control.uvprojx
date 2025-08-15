@@ -1006,6 +1006,16 @@
               <FileType>5</FileType>
               <FilePath>..\User\APP\Inc\dwt.h</FilePath>
             </File>
+            <File>
+              <FileName>flight_control.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\APP\Inc\flight_control.h</FilePath>
+            </File>
+            <File>
+              <FileName>state_machine.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\User\APP\Inc\state_machine.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -1030,6 +1040,11 @@
               <FileName>light.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\APP\Src\light.c</FilePath>
+            </File>
+            <File>
+              <FileName>flight_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\APP\Src\flight_control.c</FilePath>
             </File>
           </Files>
         </Group>

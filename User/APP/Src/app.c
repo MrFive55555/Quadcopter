@@ -4,58 +4,24 @@
  */
 
 #include "app.h"
-/* Global variables */
-pid_data_struct pid_pitch = {0};
-pid_data_struct pid_roll = {0};
-pid_data_struct pid_pitch_rate = {0};
-pid_data_struct pid_roll_rate = {0};
-pid_data_struct pid_yaw = {0};
-pid_data_struct pid_height = {0};
-attitude_data_struct attitude_data = {0};
-bmi088_data_struct bmi088_data = {0};
-spl06_data_struct spl06_data = {0};
-#ifdef ATTITUDE_USING_QUATERNION
-attitude_quaternion_struct attitude_quaternion = {.q = {1.0f, 0.0f, 0.0f, 0.0f},
-                                                  .integral_e = {0.0f, 0.0f, 0.0f},
-                                                  .mahony_kp = 2.0f,
-                                                  .mahony_ki = 0.005f};
-#endif /* ATTITUDE_USING_QUATERNION */
-uint8_t dma_receive_buffer[BUFFER_SIZE];
-com_data_struct com_data = {
-    .head_frame_size = 3,
-};
-error_queue_struct error_queue = {0};
-/* Semaphore */
-
-/* Event flags */
-#define EVENT_MEASURE_BMI088_READ (1 << 0)
-#define EVENT_MEASURE_SPL06_READ (1 << 1)
-osEventFlagsId_t event_measure_id;
-
-/* Message queue */
-#define QUEUE_COM_MSG_NUM 4
-osMessageQueueId_t queue_com_id = NULL;
-#define QUEUE_ERROR_MSG_NUM 1
-osMessageQueueId_t queue_error_id = NULL;
-/* timer */
-osTimerId_t timer_send_id = NULL;
-/* Thread attributes */
-const osThreadAttr_t task_sm_attributes = {
-    .name = "stateMachineTask",
-    .priority = osPriorityRealtime5,
-    .stack_size = 2048};
-const osThreadAttr_t task_com_attributes = {
-    .name = "commTask",
-    .priority = osPriorityLow2,
-    .stack_size = 2048};
-const osThreadAttr_t task_usb_attributes = {
-    .name = "usbTask",
-    .priority = osPriorityLow3,
-    .stack_size = 2048};
-const osThreadAttr_t task_error_attributes = {
-    .name = "errorTask",
-    .priority = osPriorityRealtime6,
-    .stack_size = 512};
+/**
+ * global data to debug 
+ */
+bmi088_data_struct *bmi_debug = NULL;
+spl06_data_struct *spl_debug = NULL;
+attitude_data_struct *attitude_debug = NULL;
+pid_data_struct *pid_debug = NULL;
+com_data_struct *com_data = NULL;
+volatile quadcopter_state_enum *quadcopter_state_debug = 0;
+static void app_get_debug_data(void);
+static void app_get_debug_data(void){
+    bmi_debug = bmi088_get_data();
+    spl_debug = spl06_get_data();
+    attitude_debug = attitude_get_data();
+    pid_debug = pid_get_data();
+    quadcopter_state_debug = quadcopter_state_get_ptr();
+    com_data = com_get_data();
+}
 /* Function declarations */
 static void timer_send_callback(void *argument);
 static void task_state_machine(void *argument);
@@ -63,16 +29,46 @@ static void task_com(void *argument);
 static void task_usb(void *argument);
 static void task_error(void *argument);
 static void enter_error_state(void); // 进入错误状态的辅助函数
-static void com_execute_command(char *tx_buf);
-/* --- state machine parameters --- */
-volatile quadcopter_state_enum quadcopter_state = STATE_INIT;
-osMessageQueueId_t queue_sm_evt_id = NULL;
+static void app_error_handler(error_queue_struct error_queue);
+static void app_command_event_handler(void *argument);
+static void app_command_timer_handler(void *argument);
+static void app_command_keep_alive_handler(void *argument);
+uint8_t dma_receive_buffer[BUFFER_SIZE];
+static error_queue_struct error_queue = {0};
+/* Semaphore */
+/* Event flags */
+#define EVENT_MEASURE_BMI088_READ (1 << 0)
+#define EVENT_MEASURE_SPL06_READ (1 << 1)
+static osEventFlagsId_t event_measure_id;
+/* Message queue */
+#define QUEUE_COM_MSG_NUM 4
+static osMessageQueueId_t queue_com_id = NULL;
+#define QUEUE_ERROR_MSG_NUM 1
+static osMessageQueueId_t queue_error_id = NULL;
 #define QUEUE_SM_EVENT_MSG_NUM 8
-volatile uint32_t g_last_heartbeat_tick = 0;
+static osMessageQueueId_t queue_sm_evt_id = NULL;
+/* timer */
+static osTimerId_t timer_send_id = NULL;
+/* Thread attributes */
+static const osThreadAttr_t task_sm_attributes = {
+    .name = "stateMachineTask",
+    .priority = osPriorityRealtime5,
+    .stack_size = 2048};
+static const osThreadAttr_t task_com_attributes = {
+    .name = "commTask",
+    .priority = osPriorityLow2,
+    .stack_size = 2048};
+static const osThreadAttr_t task_usb_attributes = {
+    .name = "usbTask",
+    .priority = osPriorityLow3,
+    .stack_size = 2048};
+static const osThreadAttr_t task_error_attributes = {
+    .name = "errorTask",
+    .priority = osPriorityRealtime6,
+    .stack_size = 512};
 /* Application start */
 void app_start(void)
 {
-  quadcopter_state = STATE_INIT; // 设置初始状态
   /**
    *event create
    */
@@ -83,35 +79,44 @@ void app_start(void)
   queue_error_id = osMessageQueueNew(QUEUE_ERROR_MSG_NUM, sizeof(error_queue_struct), NULL);
   queue_com_id = osMessageQueueNew(QUEUE_COM_MSG_NUM, sizeof(com_queue_struct), NULL);
   queue_sm_evt_id = osMessageQueueNew(QUEUE_SM_EVENT_MSG_NUM, sizeof(state_machine_event_enum), NULL); // 队列深度为8
-  error_init(queue_error_id);
   /**
    * timer create
    */
   timer_send_id = osTimerNew(timer_send_callback, osTimerPeriodic, NULL, NULL);
+  osTimerStop(timer_send_id);
   /**
    * peripheral initialization
    */
-  light_init();
-  /**
-   * occur error
-   * if error occurs, the system will stop here.
-   * now I don't know how to handle error in RTOS2
-   * so I just don't use it for now.
-   * resolution: use timer to judge idle.
-   */
+  error_register_callback(app_error_handler);
+  com_register_callback(app_command_event_handler);
+  com_register_callback(app_command_timer_handler); 
+  com_register_callback(app_command_keep_alive_handler);
+  dwt_init(); // Initialize DWT for cycle counting
   HAL_UART_Receive_DMA(&huart1, dma_receive_buffer, sizeof(dma_receive_buffer));
   HAL_TIM_Base_Start_IT(&htim6);
-  //tusb_init();
-  attitude_init(&attitude_data, 0);
-  dwt_init(); // Initialize DWT for cycle counting
-  pid_init(&pid_pitch, 8.0f, 0.2f, 0.0f, 200, 400);
-  pid_init(&pid_roll, 8.0f, 0.2f, 0.0f, 200, 400);
-  pid_init(&pid_pitch_rate, 2.0f, 0.01f, 0.002f, 200, 400);
-  pid_init(&pid_roll_rate, 2.0f, 0.01f, 0.002f, 200, 400);
-  pid_init(&pid_height, 2.0f, 0.01f, 0.01f, 200, 400);
-  bmi088_init(&hspi1, &bmi088_data);
-  spl06_init(&hi2c1, &spl06_data);
   ch9141k_init();
+  light_off_all();
+  // tusb_init();
+  bmi088_init(&hspi1);
+  spl06_init(&hi2c1);
+  attitude_init(2.0f, 0.005f);
+#ifdef ATTITUDE_USING_QUATERNION
+  pid_init(PID_PITCH, 3.5f, 0.0f, 0.0f, 200, 400);
+  pid_init(PID_ROLL, 3.5f, 0.0f, 0.0f, 200, 400);
+  pid_init(PID_YAW, 2.5f, 0.0f, 0.0f, 200, 400);
+  pid_init(PID_PITCH_RATE, 0.8f, 0.0f, 0.0005f, 200, 400);
+  pid_init(PID_ROLL_RATE, 0.8f, 0.0f, 0.0005f, 200, 400);
+  pid_init(PID_YAW_RATE, 1.0f, 0.0f, 0.0f, 200, 400);
+  pid_init(PID_HEIGHT, 2.0f, 0.01f, 0.01f, 200, 400);
+#else
+  pid_init(PID_PITCH, 8.0f, 0.2f, 0.0f, 200, 400);
+  pid_init(PID_ROLL, 8.0f, 0.2f, 0.0f, 200, 400);
+  pid_init(PID_YAW, 2.0f, 0.2f, 0.0f, 200, 400);
+  pid_init(PID_PITCH_RATE, 2.0f, 0.01f, 0.002f, 200, 400);
+  pid_init(PID_ROLL_RATE, 2.0f, 0.01f, 0.002f, 200, 400);
+  pid_init(PID_YAW_RATE, 2.0f, 0.01f, 0.002f, 200, 400);
+  pid_init(PID_HEIGHT, 2.0f, 0.01f, 0.01f, 200, 400);
+#endif /* ATTITUDE_USING_QUATERNION */
   /**
    *  thread create
    */
@@ -120,7 +125,8 @@ void app_start(void)
   // osThreadNew(task_usb, NULL, &task_usb_attributes);
   osThreadNew(task_error, NULL, &task_error_attributes);
   // 初始化完成，转换到下一个状态
-  quadcopter_state = STATE_CALIBRATING;
+  quadcopter_state_set(STATE_CALIBRATING);
+  app_get_debug_data();
   osThreadTerminate(osThreadGetId()); // Terminate the start task immediately
 }
 /**
@@ -135,10 +141,10 @@ static void task_state_machine(void *argument)
   static uint32_t flags;
   static state_machine_event_enum queue_sm_evt;
   static osStatus_t event_status;
-  static uint32_t bmi088_sync_counter = 0;
-  static uint32_t spl06_sync_counter = 0;
-  static uint32_t current_tick = 0;
-  static const uint32_t HEARTBEAT_TIMEOUT_TICKS = 5000;
+  static uint32_t spl06_sampling_count = 0;
+  bmi088_data_struct *bmi088_data = bmi088_get_data();
+  spl06_data_struct *spl06_data = spl06_get_data();
+  pid_data_struct *pid_data = pid_get_data();
   while (1)
   {
     // 1. 等待高频传感器数据就绪 (主驱动)
@@ -146,103 +152,24 @@ static void task_state_machine(void *argument)
     // 2. 读取传感器数据
     if (flags & EVENT_MEASURE_BMI088_READ)
     {
-      bmi088_read_acc_gyro(&hspi1, &bmi088_data);
+      spl06_sampling_count++;
+      bmi088_read_acc_gyro(&hspi1);
     }
+    // if (spl06_sampling_count >= 32) // 每32次读取一次气压计数据，约50Hz
+    // {
+    //   spl06_sampling_count = 0;
+    //   spl06_read_temp_press(&hi2c1);
+    // }
     // 3. 非阻塞地检查命令事件队列
     event_status = osMessageQueueGet(queue_sm_evt_id, &queue_sm_evt, NULL, 0U); // 0U超时=立即返回
-    if (queue_sm_evt == EVT_CRITICAL_ERROR)
-    {
-      enter_error_state(); // 进入错误状态
-    }
     if (event_status != osOK)
     {
       queue_sm_evt = EVT_NONE; // 如果没有收到事件，则设为无事件
     }
     // --- 4. 根据当前状态执行逻辑 ---
-    switch (quadcopter_state)
-    {
-    case STATE_INIT: // 1.init state
-      break;
-
-    case STATE_CALIBRATING: // 2.calibration state
-      if (bmi088_data.bias_ok_flag)
-      {
-        quadcopter_state = STATE_IDLE; // 校准完成，进入待机
-      }
-      break;
-
-    case STATE_IDLE: // 3.idle state
-      // 在待机状态，只响应“起飞”指令
-      if (queue_sm_evt == EVT_CMD_TAKE_OFF)
-      {
-        g_last_heartbeat_tick = osKernelGetTickCount(); // 更新心跳时间戳
-        attitude_enable_pwm(1);
-        quadcopter_state = STATE_FLYING;
-      }
-      break;
-
-    case STATE_FLYING: // 4.flying state
-      // 在飞行状态，优先处理“降落”指令
-      if (queue_sm_evt == EVT_CMD_LAND)
-      {
-        attitude_enable_pwm(0);
-        pid_reset(&pid_pitch);
-        pid_reset(&pid_roll);
-        pid_reset(&pid_pitch_rate);
-        pid_reset(&pid_roll_rate);
-        pid_reset(&pid_height);
-        attitude_reset(&attitude_data);
-        bmi088_reset(&bmi088_data);
-        spl06_reset(&spl06_data);
-        quadcopter_state = STATE_CALIBRATING;
-        continue; // 立即开始下一次循环，不再执行飞行计算
-      }
-      else if (queue_sm_evt == EVT_KEEP_ALIVE)
-      {
-        g_last_heartbeat_tick = osKernelGetTickCount(); // 更新心跳时间戳
-      }
-      current_tick = osKernelGetTickCount();
-      // 检查当前时间与上次心跳时间的差值
-      if ((current_tick - g_last_heartbeat_tick) > HEARTBEAT_TIMEOUT_TICKS)
-      {
-        // 超时发生！发送一个严重错误事件
-        enter_error_state(); // 进入错误状态
-      }
-      if (++bmi088_sync_counter >= 4) // 每4次循环处理一次传感器数据，约400Hz
-      {
-        bmi088_sync_counter = 0; // 重置计数器
-#ifdef ATTITUDE_USING_QUATERNION
-        attitude_mahony_angle_calculate(&bmi088_data, &attitude_quaternion, &attitude_data);
-#else
-        attitude_angle_calculate(&attitude_data, &bmi088_data);
-#endif /* ATTITUDE_USING_QUATERNION */
-        attitude_motor_control(&attitude_data, &bmi088_data, &pid_pitch, &pid_roll, &pid_pitch_rate, &pid_roll_rate);
-        // 高度控制以较低频率运行 (~50Hz)
-        if (++spl06_sync_counter >= 8)
-        {
-          spl06_sync_counter = 0;
-          spl06_read_temp_press(&hi2c1, &spl06_data);
-          if (pid_height.setpoint > 0.1f || pid_height.setpoint < -0.1f) // 仅当设定点大于0.1时才进行高度控制
-          {
-            attitude_height_control(&attitude_data, &spl06_data, &pid_height);
-          }
-        }
-      }
-      break;
-
-    case STATE_ERROR: // 5.error state
-      // 终结状态，只闪烁错误灯
-      light_control(LIGHT_ERROR, LIGHT_BLINK);
-      osDelay(200);
-      break;
-    // 意外状态，直接进入错误状态以策安全
-    default:
-      enter_error_state();
-      break;
-    }
+    flight_control_run(bmi088_data, spl06_data, pid_data, queue_sm_evt);
   }
 }
-
 /* Communication task */
 static void task_com(void *argument)
 {
@@ -250,6 +177,7 @@ static void task_com(void *argument)
   static char tx_buf[BUFFER_SIZE]; // 用于发送数据的缓冲区
   static uint8_t linear_buffer[BUFFER_SIZE];
   osStatus_t status;
+  attitude_data_struct *attitude_data = attitude_get_data();
   while (1)
   {
     status = osMessageQueueGet(queue_com_id, &recv_msg, NULL, osWaitForever);
@@ -275,15 +203,14 @@ static void task_com(void *argument)
       // --- 环形缓冲区处理完毕 ---
       // 现在，linear_buffer 中包含了完整、连续的一帧数据
       // 将这个干净的线性缓冲区传递给解析函数
-      com_parse_buf(&com_data, linear_buffer, recv_msg.length);
-      com_execute_command(tx_buf); // 执行命令
+      com_parse_buf(linear_buffer, recv_msg.length);
     }
     else if (recv_msg.source == COM_UART_SEND)
     {
       // light_control(LIGHT_ERROR, LIGHT_BLINK);
       int len = sprintf(tx_buf, "angle:%f,%f,pwm:%d,%d,%d,%d\r\n",
-                        attitude_data.angle[PITCH], attitude_data.angle[ROLL],
-                        attitude_data.pwm[0], attitude_data.pwm[1], attitude_data.pwm[2], attitude_data.pwm[3]);
+                        attitude_data->angle[PITCH], attitude_data->angle[ROLL],
+                        attitude_data->pwm[0], attitude_data->pwm[1], attitude_data->pwm[2], attitude_data->pwm[3]);
       if (len > 0)
       {
         HAL_UART_Transmit_DMA(&huart1, (uint8_t *)tx_buf, len);
@@ -336,7 +263,7 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
   {
     osEventFlagsSet(event_measure_id, EVENT_MEASURE_BMI088_READ);
   }
-  if (GPIO_Pin == SPL06_INT_PIN)
+  else if (GPIO_Pin == SPL06_INT_PIN)
   {
     osEventFlagsSet(event_measure_id, EVENT_MEASURE_SPL06_READ);
   }
@@ -380,118 +307,58 @@ void COM_Uart_Idle_Callback()
       // 找到了完整的一帧，发送消息给任务
       com_queue_struct msg = {.source = COM_UART_READ, .start_pos = frame_start_pos, .length = length};
       osMessageQueuePut(queue_com_id, &msg, 0, 0);
-
       // 更新下一帧的起始点
       frame_start_pos = old_pos;
     }
   }
 }
+// Timer callback to send data periodically
 static void timer_send_callback(void *argument)
 {
   com_queue_struct msg = {.source = COM_UART_SEND, .start_pos = 0, .length = 0};
   osMessageQueuePut(queue_com_id, &msg, 0, 0);
 }
-/**
- * @brief 辅助函数，用于执行进入错误状态时的所有关键操作
- */
-static void enter_error_state(void)
+// call back to handler errors
+static void app_error_handler(error_queue_struct error_queue)
 {
-  // 1. 安全第一：立即关闭所有电机
-  attitude_enable_pwm(0);
-
-  // 2. 强制将系统状态设置为错误
-  quadcopter_state = STATE_ERROR;
-
-  // 3. （可选）可以在此处记录具体的错误信息
-
-  // 状态机的 ERROR case 将会接管后续的错误指示（如LED闪烁）
+  osMessageQueuePut(queue_error_id, &error_queue, 0, 0);
 }
-/**
- * @brief 执行上位机发送过来的指令
- */
-static void com_execute_command(char *tx_buf)
+// callback to handle events
+static void app_command_event_handler(void *argument)
 {
-  // *** 关键改动：将命令转换为事件 ***
-  state_machine_event_enum queue_sm_evt = EVT_NONE;
-  switch (com_data.command_type)
+  // 这个函数在 app.c 的上下文中执行，所以它可以安全地访问 app.c 的变量
+  state_machine_event_enum event = (state_machine_event_enum)argument;
+  if (event != EVT_NONE)
   {
-  case COM_NONE:
-    return;
-    break;
-  case COM_TAKE_OFF:
-    if (com_data.take_off)
-    {
-      if (quadcopter_state == STATE_IDLE)
-      {
-        queue_sm_evt = EVT_CMD_TAKE_OFF;
-      }
-    }
-    else
-    {
-      if (quadcopter_state == STATE_FLYING)
-      {
-        queue_sm_evt = EVT_CMD_LAND;
-      }
-    }
-    break;
-  case COM_PID_SET:
-    break;
-  case COM_PID_GET:
-    break;
-  case COM_ADD_HEIGHT:
-    if (quadcopter_state == STATE_FLYING)
-    {
-      if (pid_height.setpoint < 0.1f && pid_height.setpoint > -0.1f)
-      {
-        pid_height.setpoint = spl06_data.pressure;
-      }
-      pid_height.setpoint -= 5.0f; // 增加高度设定点
-    }
-    break;
-  case COM_MINUS_HEIGHT:
-    if (quadcopter_state == STATE_FLYING)
-    {
-      if (pid_height.setpoint < 0.1f && pid_height.setpoint > -0.1f)
-      {
-        pid_height.setpoint = spl06_data.pressure;
-      }
-      pid_height.setpoint += 5.0f; // 减低高度设定点
-    }
-    break;
-  case COM_ADD_THROTTLE:
-    if (quadcopter_state == STATE_FLYING)
-    {
-      attitude_data.throttle += 100; // 增加油门
-    }
-    break;
-  case COM_MINUS_THROTTLE:
-    if (quadcopter_state == STATE_FLYING)
-    {
-      if (attitude_data.throttle > 0)
-        attitude_data.throttle -= 100;
-    }
-    break;
-  case COM_ENABLE_LOG:
+    // 将接收到的事件放入状态机消息队列
+    osMessageQueuePut(queue_sm_evt_id, &event, 0, 0);
+  }
+}
+// call back to handle timer
+static void app_command_timer_handler(void *argument)
+{
+  uint8_t timer_enable = (uint8_t)argument;
+  if (timer_enable)
+  {
+    // 启动定时器发送数据
     osTimerStart(timer_send_id, 100);
-    break;
-  case COM_DISABLE_LOG:
-    osTimerStop(timer_send_id);
-    break;
-  case COM_KEEP_ALIVE:
-    queue_sm_evt = EVT_KEEP_ALIVE; // 发送心跳事件
-    int len = sprintf(tx_buf, "$ACK_KEP\r\n");
-    if (len > 0)
-    {
-      HAL_UART_Transmit_DMA(&huart1, (uint8_t *)tx_buf, len);
-    }
-    break;
-  default:
-    break;
   }
-  if (queue_sm_evt != EVT_NONE)
+  else
   {
-    // 发送事件到状态机队列
-    osMessageQueuePut(queue_sm_evt_id, &queue_sm_evt, 0, 0);
+    // 停止定时器发送数据
+    osTimerStop(timer_send_id);
   }
-  com_data.command_type = COM_NONE; // reset command type after processing
+}
+// call back to trigger heart
+static void app_command_keep_alive_handler(void *argument)
+{
+  char tx_buf[11];
+  state_machine_event_enum event = (state_machine_event_enum)argument; // 发送心跳事件
+  osMessageQueuePut(queue_sm_evt_id, &event, 0, 0);
+  // feedback to client
+  int len = sprintf(tx_buf, "$ACK_KEP\r\n");
+  if (len > 0)
+  {
+    HAL_UART_Transmit_DMA(&huart1, (uint8_t *)tx_buf, len);
+  }
 }

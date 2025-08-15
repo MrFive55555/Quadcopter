@@ -6,49 +6,48 @@
  */
 
 #include "pid.h"
-
-/* Your code here */
-void pid_init(pid_data_struct *pid, float kp, float ki, float kd,
+static pid_data_struct pid_data[PID_NUM];
+pid_data_struct* pid_get_data(void){
+    return pid_data;
+}
+void pid_init(pid_enum index, float kp, float ki, float kd,
               float integral_limit, float output_limit)
 {
-    pid->kp = kp;
-    pid->ki = ki;
-    pid->kd = kd;
-    pid->integral_limit = integral_limit;
-    pid->output_limit = output_limit;
+    pid_data[index].kp = kp;
+    pid_data[index].ki = ki;
+    pid_data[index].kd = kd;
+    pid_data[index].integral_limit = integral_limit;
+    pid_data[index].output_limit = output_limit;
 
-    pid->setpoint = 0;
-    pid->integral = 0;
-    pid->last_error = 0;
+    pid_data[index].target = 0;
+    pid_data[index].integral = 0;
+    pid_data[index].last_error = 0;
 }
-float pid_update(pid_data_struct *pid, float measurement, float dt)
+float pid_update(pid_enum index, float measurement, float dt)
 {
-    float error = pid->setpoint - measurement;
-    pid->integral += error * dt;
+    float error = pid_data[index].target - measurement;
+    pid_data[index].integral += error * dt;
 
     // 积分限幅
-    if (pid->integral > pid->integral_limit)
-        pid->integral = pid->integral_limit;
-    if (pid->integral < -pid->integral_limit)
-        pid->integral = -pid->integral_limit;
+    if (pid_data[index].integral > pid_data[index].integral_limit)
+        pid_data[index].integral = pid_data[index].integral_limit;
+    if (pid_data[index].integral < -pid_data[index].integral_limit)
+        pid_data[index].integral = -pid_data[index].integral_limit;
 
-    float derivative = (error - pid->last_error) / dt;
-    pid->last_error = error;
+    float derivative = (error - pid_data[index].last_error) / dt;
+    pid_data[index].last_error = error;
 
-    float output = pid->kp * error + pid->ki * pid->integral + pid->kd * derivative;
+    float output = pid_data[index].kp * error + pid_data[index].ki * pid_data[index].integral + pid_data[index].kd * derivative;
 
     // 输出限幅
-    if (output > pid->output_limit)
-        output = pid->output_limit;
-    if (output < -pid->output_limit)
-        output = -pid->output_limit;
+    if (output > pid_data[index].output_limit)
+        output = pid_data[index].output_limit;
+    if (output < -pid_data[index].output_limit)
+        output = -pid_data[index].output_limit;
 
     return output;
 }
-void pid_reset(pid_data_struct *pid)
+void pid_set_target(pid_enum index, float target)
 {
-    pid->setpoint = 0;
-    pid->integral = 0;
-    pid->last_error = 0;
-    // 不重置 kp, ki, kd, output_limit, integral_limit
+    pid_data[index].target = target;
 }

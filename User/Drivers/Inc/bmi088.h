@@ -7,12 +7,10 @@
  * @author   Mr.Five
  * @date     2025-06-08 21:55:04
  */
-#include <string.h>
 #include "main.h"
 #include "cmsis_os2.h"
-#include "FreeRTOS.h"
-#include "semphr.h"
 #include "error.h"
+#include <string.h>
 /**
  * BMI088 register addresses
  */
@@ -74,6 +72,8 @@
 #define BMI088_ACC_NORM_1G (32768.0f / 3.0f)                    // ±3g 对应的加速度计数据 1g 的值
 #define BMI088_STATIC_G_NORM_SQ_MIN (BMI088_ACC_NORM_1G * 0.9f) // 0.9g
 #define BMI088_STATIC_G_NORM_SQ_MAX (BMI088_ACC_NORM_1G * 1.1f) // 1.1g
+#define BMI088_GYRO_SENS (2000.0f / 32768.0f) // ±2000°/s，对应比例
+#define BMI088_ACC_SENS (1.0f / 10920.0f)     // ±3g, based on datasheet sensitivity 10920 LSB/g
 typedef enum
 {
     BMI088_ACCEL = 0, // 加速度计
@@ -115,7 +115,7 @@ typedef struct
 /**
  * function declaration
  */
-void bmi088_reset(bmi088_data_struct *bmi088_data);
-void bmi088_init(SPI_HandleTypeDef *hspix, bmi088_data_struct *bmi088_data);
-void bmi088_read_acc_gyro(SPI_HandleTypeDef *hspix, bmi088_data_struct *bmi088_data);
+bmi088_data_struct* bmi088_get_data(void);
+void bmi088_init(SPI_HandleTypeDef *hspix);
+void bmi088_read_acc_gyro(SPI_HandleTypeDef *hspix);
 #endif /* BMI088_H */

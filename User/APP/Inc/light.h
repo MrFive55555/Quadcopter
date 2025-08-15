@@ -25,6 +25,6 @@ typedef enum
    LIGHT_TAKE_OFF = 0,
    LIGHT_ERROR = 1,
 } light_type_enum;
-void light_init(void);
+void light_off_all(void);
 void light_control(light_type_enum type, light_state_enum state);
 #endif /* LIGHT_H */

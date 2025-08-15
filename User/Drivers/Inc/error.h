@@ -7,9 +7,6 @@
  * @author   Mr.Five
  * @date     2025-06-17 11:07:02
  */
-#include "cmsis_os2.h"
-#include "FreeRTOS.h"
-#include "queue.h"
 typedef enum
 {
     ERROR_BMI088 = 0,
@@ -29,6 +26,7 @@ typedef struct
     error_device_enum device; // 设备类型
     error_type_enum type;     // 错误类型
 } error_queue_struct;
-void error_init(osMessageQueueId_t queue);
+typedef void (*error_callback_t)(error_queue_struct);
+void error_register_callback(error_callback_t callback);
 void error_check(error_device_enum device, error_type_enum error);
 #endif /* ERROR_H */

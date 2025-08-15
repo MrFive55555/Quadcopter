@@ -9,36 +9,28 @@
  */
 #include "main.h"
 #include <stdlib.h>
+#include <string.h>
+#include "attitude.h"
+#include "state_machine.h"
+#include "flight_control.h"
+#include "pid.h"
+
 #define BUFFER_SIZE 256
 #define CHAR_BLANK 32
 #define CHAR_ENTER 10
 #define CHAR_CR 13
-typedef enum
+typedef void (*command_handler_func)(uint8_t *buf);
+typedef void (*com_callback_t)(void *);
+typedef struct
 {
-  COM_NONE = 0,   // no command
-  COM_TAKE_OFF,   // take off command
-  COM_PID_SET,    // set pid
-  COM_PID_GET,    // get pid
-  COM_ADD_HEIGHT, // add height
-  COM_MINUS_HEIGHT, // sub height
-  COM_ADD_THROTTLE, // add throttle
-  COM_MINUS_THROTTLE, // sub throttle
-  COM_ENABLE_LOG, // enable log
-  COM_DISABLE_LOG, // disable log
-  COM_KEEP_ALIVE, // keep alive command
-} com_type_enum;
+  const char *command_str;    // 命令字符串
+  const command_handler_func handler; // 命令处理函数
+} command_lookup_struct;
 typedef struct
 {
   uint8_t head_frame_size;
-  uint8_t head_frame[4]; // head frame is 3 bit,but use more bit to judge
-  uint8_t is_head_frame; // command content
-  uint8_t command_type;
-  uint8_t take_off; // 0: not take off, 1: take off
-  // uint8_t height;
-  float pid[3]; // pid value
-  uint32_t start_time;
-  uint32_t end_time;
-  uint32_t measure_time;
+  uint8_t head_frame[3];
+  uint8_t is_head_frame; 
 } com_data_struct;
 typedef enum
 {
@@ -56,7 +48,7 @@ typedef struct
 /**
  * function declaration
  */
-// void com_init(uint8_t *buf,uint16_t length);
-void com_parse_buf(com_data_struct *com_data, uint8_t *buf, uint32_t length);
-void com_usb_parse_buf(uint8_t *buf, uint32_t length);
+com_data_struct *com_get_data(void);
+void com_register_callback(com_callback_t callback);
+void com_parse_buf(uint8_t *buf, uint32_t length);
 #endif /* COM_H */

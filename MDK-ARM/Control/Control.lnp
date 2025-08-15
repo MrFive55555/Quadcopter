@@ -40,6 +40,7 @@
 "control\attitude.o"
 "control\com.o"
 "control\light.o"
+"control\flight_control.o"
 "control\tusb.o"
 "control\cdc_device.o"
 "control\usbd.o"

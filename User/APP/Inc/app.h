@@ -19,6 +19,7 @@
 #include "tusb.h"
 
 #include "state_machine.h"
+#include "flight_control.h"
 #include "attitude.h"
 #include "com.h"
 #include "bmi088.h"

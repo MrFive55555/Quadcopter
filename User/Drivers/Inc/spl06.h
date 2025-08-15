@@ -7,12 +7,10 @@
  * @author   Mr.Five
  * @date     2025-06-10 10:38:51
  */
-#include <math.h>
-#include <string.h>
 #include "main.h"
 #include "cmsis_os2.h"
-#include "FreeRTOS.h"
-#include "semphr.h"
+#include <math.h>
+#include <string.h>
 #include "error.h"
 /**
  * SPL06 sensor configuration
@@ -58,7 +56,7 @@ typedef struct
 /**
  * function declaration
  */
-void spl06_reset(spl06_data_struct *spl06_data);
-void spl06_init(I2C_HandleTypeDef *hi2cx, spl06_data_struct *spl06_data);
-void spl06_read_temp_press(I2C_HandleTypeDef *hi2cx, spl06_data_struct *spl06_data);
+void spl06_init(I2C_HandleTypeDef *hi2cx);
+spl06_data_struct *spl06_get_data(void);
+void spl06_read_temp_press(I2C_HandleTypeDef *hi2cx);
 #endif /* SPL06_H */
